@@ -1,0 +1,198 @@
+---
+title: "Election Prediction Example"
+author: "Michael Chong"
+date: "2023-06-20"
+output: 
+  html_document:
+    code_folding: show
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(rstanarm)
+library(bayesplot)
+library(patchwork)
+```
+
+
+## Introduction
+
+This notebook is a practical introduction to evaluating Bayesian models using 3 different summaries/metrics:
+
+1. elpd: (expected log predictive density)
+2. posterior predictive checks of outcome
+3. posterior predictive checks of test statistics
+
+## Data: vote share in US Congressional districts
+
+This example is adapted from Chapter 10 of ["Regression and Other Stories" by Gelman, Hill, and Vehtari.](https://avehtari.github.io/ROS-Examples/) The link to the original data can be found [here](https://github.com/avehtari/ROS-Examples/tree/master/Congress/). 
+
+Each row of these data represent a US congressional district, with the following columns:
+
+* `vote_D`, representing the Democratic share of the Democratic + Republican votes in the **1988** election in the district
+* `past_vote_D`, representing the Democratic share of the Democratic + Republican votes in the **1986** election in the district
+* `incumbent`, taking values `D` or `R` indicating whether the incumbent candidate is a Democrat or Republican. 
+
+To simplify the model, the data is modified such that:
+
+* we only keep districts contested in both elections (the 1986 and 1988 vote shares cannot be 0 or 1), and
+* we only keep districts where the incumbent runs (omit those where e.g. the incumbent retires)
+
+
+```{r}
+voting <- read_csv("data/us_election_1988.csv")
+
+head(voting)
+```
+
+We are interested in estimating the 1988 vote share (`vote_D`) based on 3 candidate models:
+
+* `mod1`: the 1988 vote share depends only on the party of the incumbent (`vote_D ~ incumbent`)
+* `mod2`: the 1988 vote share depends only on the 1986 vote share (`vote_D ~ past_vote_D`)
+* `mod3`: the 1988 vote share depends on the 1986 vote share and an adjustment based on the party of the incumbent (`vote_D ~ past_vote_D + incumbent`)
+
+```{r}
+mod1 <- stan_glm(
+  vote_D ~ incumbent, 
+  data = voting,
+  refresh = 0,
+  iter = 1000
+)
+
+mod2 <- stan_glm(
+  vote_D ~ past_vote_D,
+  data = voting,
+  refresh = 0,
+  iter = 1000
+)
+
+mod3 <- stan_glm(
+  vote_D ~ past_vote_D + incumbent,
+  data = voting, 
+  refresh = 0,
+  iter = 1000
+)
+```
+
+## 1. ELPD
+
+You can get an estimate of the leave-one-out ELPD first using the `loo::loo()` function. For this tutorial, the first row (elpd_loo) is the quantity we're interested in. For guidance in interpreting the other quantities, see `?loo::loo` or `help(loo, "loo")`
+
+```{r}
+loo(mod1)
+```
+
+The ELPD is difficult to interpret on its own. You can compare the ELPD of multiple models with `loo::loo_compare()` 
+
+```{r}
+loo_compare(
+  loo(mod1),
+  loo(mod2),
+  loo(mod3)
+)
+```
+
+The ELPD is sort of a total score based on the predictive density, so higher is better. The output has the models listed in order of decreasing ELPD with the difference in ELPD with respect to the top model.
+
+**Interpretation**: the 1988 vote shares are better explained using the relationship to past vote share compared to using only the party of the incumbent candidate, but there is little gain from including both.
+
+## 2. Posterior predictive checks of outcome
+
+We can check the overall (or "marginal") distribution of the vote shares predicted by the model to see whether they agree with the true distribution of responses. A convenient function to do this is `bayesplot::ppc_dens_overlay()`. 
+
+We are looking for the observed distribution (`y` in dark blue) to fall somewhere in the plausible range of model predictions (`yrep` in light blue). If it doesn't, then this suggests the model is not doing a good job of capturing the variation in the data.
+
+```{r}
+p1 <- ppc_dens_overlay(
+  y = voting$vote_D,
+  yrep = posterior_predict(mod1)[sample(1:2000, 100), ]
+)
+
+p2 <- ppc_dens_overlay(
+  y = voting$vote_D,
+  yrep = posterior_predict(mod2)[sample(1:2000, 100), ]
+)
+
+p3 <- ppc_dens_overlay(
+  y = voting$vote_D,
+  yrep = posterior_predict(mod3)[sample(1:2000, 100), ]
+)
+
+p1 / p2 / p3 + plot_layout(guides = "collect") &
+  theme(legend.position = "bottom") &
+  xlim(0, 1)
+```
+
+**Observations** about the plots above: 
+
+* all of the models are able to capture some bimodal behaviour
+* second model predicts more close elections than the other models
+* all the models somewhat overestimate the Democratic voteshare in places where it turned out to be low
+
+We can also split up the predictions by custom groupings. For example, we might be interested in how the prediction performance varies for districts depending on one of the covariates. Below we split up the past vote share into 3 groups:
+
+```{r}
+p1 <- ppc_dens_overlay_grouped(
+  y = voting$vote_D,
+  yrep = posterior_predict(mod1)[sample(1:2000, 100), ],
+  group = cut(voting$past_vote_D, c(0, .33, .67, 1))
+)
+
+p2 <- ppc_dens_overlay_grouped(
+  y = voting$vote_D,
+  yrep = posterior_predict(mod2)[sample(1:2000, 100), ],
+  group = cut(voting$past_vote_D, c(0, .33, .67, 1))
+)
+
+p3 <- ppc_dens_overlay_grouped(
+  y = voting$vote_D,
+  yrep = posterior_predict(mod3)[sample(1:2000, 100), ],
+  group = cut(voting$past_vote_D, c(0, .33, .67, 1))
+)
+
+p1 / p2 / p3 + plot_layout(guides = "collect") & 
+  theme(legend.position = "bottom") &
+  xlim(0, 1)
+
+```
+
+**Observations**
+
+* Model 1 predicts that there are fewer close elections than there actually were
+* Model 1 overpredicts Democratic vote share more severely in the low range
+
+## 3. Posterior predictive checks of test statistic (# of districts won)
+
+```{r}
+p1 <- ppc_stat(
+  y = voting$vote_D,
+  yrep = posterior_predict(mod1),
+  stat = function(x) {sum(x > .5)},
+  binwidth = 2
+) + xlim(130, 170)
+
+p2 <- ppc_stat(
+  y = voting$vote_D,
+  yrep = posterior_predict(mod2),
+  stat = function(x) {sum(x > .5)},
+  binwidth = 2
+) + xlim(130, 170)
+
+p3 <- ppc_stat(
+  y = voting$vote_D,
+  yrep = posterior_predict(mod3),
+  stat = function(x) {sum(x > .5)},
+  binwidth = 2
+) + xlim(130, 170)
+
+p1 / p2 / p3 
+```
+
+**Observation** 
+
+* model 1 and 3 tend to underestimate the number of seats won by Democrats
+  * Q: Why does this happen for model 3? 
+

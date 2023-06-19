@@ -1,0 +1,137 @@
+---
+title: "Birthweight and gestational age example"
+author: "Michael Chong"
+output: 
+  html_document:
+    code_folding: show
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(rstanarm)
+library(loo)
+library(bayesplot)
+library(patchwork)
+
+births <- read_csv("data/births_2017_sample_trim.csv") |>
+  mutate(
+    premature32 = gest < 32,
+    premature37 = gest < 37
+  )
+```
+
+
+## Data: sample of US birth data
+
+This example is adapted from [Monica Alexander's course on Applied Statistics](https://github.com/MJAlexander/applied-stats-2023) at the University of Toronto. 
+
+The data represent a sample of births in the US, containing information about the mother's age, baby's sex, gestational age (in weeks) and birthweight (in kg). I've added columns indicating whether the gestational age is less than 32 weeks and less than 37 weeks.
+
+
+```{r}
+ggplot(births, aes(x = gest, y = birthweight)) +
+  geom_point(alpha = 0.5) +
+  scale_x_log10() +
+  scale_y_log10() +
+  scale_colour_discrete(name = "") + 
+  geom_vline(xintercept = 31.75, alpha = 0.5, colour = "darkred") +
+  geom_vline(xintercept = 36.75, colour = "darkred")
+```
+
+
+We are interested in three candidate models:
+
+1. birthweight dependent on gestational age
+2. birthweight dependent on interaction of gestational age and pre-32 week prematurity
+3. birthweight dependent on interaction of gestational age and pre-37 week prematurity
+
+```{r}
+mod1 <- stan_glm(
+  log(birthweight) ~ log(gest),
+  data = births,
+  refresh = 0,
+  iter = 1000
+)
+
+mod2 <- stan_glm(
+  log(birthweight) ~ log(gest)*premature32,
+  data = births,
+  refresh = 0, 
+  iter = 1000
+)
+
+
+mod3 <- stan_glm(
+  log(birthweight) ~ log(gest)*premature37,
+  data = births,
+  refresh = 0, 
+  iter = 1000
+)
+```
+
+
+## 1. ELPD
+
+```{r}
+loo_compare(
+  loo(mod1), 
+  loo(mod2),
+  loo(mod3)
+)
+```
+
+
+## 2. PPC of outcome
+
+```{r}
+p1 <- ppc_dens_overlay(
+  y = log(births$birthweight),
+  yrep = posterior_predict(mod1)[sample(1:2000, 100), ]
+)
+
+p2 <- ppc_dens_overlay(
+  y = log(births$birthweight),
+  yrep = posterior_predict(mod2)[sample(1:2000, 100), ]
+)
+
+p3 <- ppc_dens_overlay(
+  y = log(births$birthweight),
+  yrep = posterior_predict(mod3)[sample(1:2000, 100), ]
+)
+
+p1 / p2 / p3 + plot_layout(guides = "collect") & xlim(0, 2)
+```
+
+## 3. PPC of test statistic
+
+```{r}
+p1 <- ppc_stat(
+  y = births$birthweight,
+  yrep = exp(posterior_predict(mod1)),
+  stat = function(x) {
+    sum(x < 2.5) / length(x)
+  }
+) + xlim(0.08, 0.15)
+
+p2 <- ppc_stat(
+  y = births$birthweight,
+  yrep = exp(posterior_predict(mod2)),
+  stat = function(x) {
+    sum(x < 2.5) / length(x)
+  }
+) + xlim(0.08, 0.15)
+
+p3 <- ppc_stat(
+  y = births$birthweight,
+  yrep = exp(posterior_predict(mod3)),
+  stat = function(x) {
+    sum(x < 2.5) / length(x)
+  }
+) + xlim(0.08, 0.15)
+
+p1 / p2 / p3 + plot_layout(guides = "collect") 
+```
+
