@@ -135,3 +135,52 @@ p3 <- ppc_stat(
 p1 / p2 / p3 + plot_layout(guides = "collect") 
 ```
 
+```{r}
+data_grid <- data.frame(
+  gest = min(births$gest):max(births$gest)
+) |>
+  mutate(premature32 = gest < 32, premature37 = gest < 37)
+
+p1 <- ppd_ribbon_data(
+  ypred = posterior_predict(mod1, data_grid),
+  x = data_grid$gest
+) |>
+  ggplot() +
+    geom_line(aes(x = x, y = m), colour = "cornflowerblue") +
+    geom_ribbon(aes(x = x, ymin = l, ymax = h), alpha = 0.4, fill = "cornflowerblue") +
+    geom_ribbon(aes(x = x, ymin = ll, ymax = hh), alpha = 0.4, fill = "cornflowerblue") +
+    geom_point(data = births, aes(x = gest, y = log(birthweight)), alpha = 0.3) +
+    labs(subtitle = "model 1", x = "Gest. age (weeks)", y = "log birth weight (log(kg))") +
+    geom_hline(yintercept = log(2.5))
+
+p2 <- ppd_ribbon_data(
+  ypred = posterior_predict(mod2, data_grid),
+  x = data_grid$gest
+) |>
+  ggplot() +
+    geom_line(aes(x = x, y = m), colour = "cornflowerblue") +
+    geom_ribbon(aes(x = x, ymin = l, ymax = h), alpha = 0.4, fill = "cornflowerblue") +
+    geom_ribbon(aes(x = x, ymin = ll, ymax = hh), alpha = 0.4, fill = "cornflowerblue") +
+    geom_point(data = births, aes(x = gest, y = log(birthweight)), alpha = 0.3) +
+    labs(subtitle = "model 2", x = "Gest. age (weeks)", y = "log birth weight (log(kg))") +
+    geom_vline(xintercept = 31.75) +
+    geom_vline(xintercept = 36.75) +
+    geom_hline(yintercept = log(2.5))
+
+p3 <- ppd_ribbon_data(
+  ypred = posterior_predict(mod3, data_grid),
+  x = data_grid$gest
+) |>
+  ggplot() +
+    geom_line(aes(x = x, y = m), colour = "cornflowerblue") +
+    geom_ribbon(aes(x = x, ymin = l, ymax = h), alpha = 0.4, fill = "cornflowerblue") +
+    geom_ribbon(aes(x = x, ymin = ll, ymax = hh), alpha = 0.4, fill = "cornflowerblue") +
+    geom_point(data = births, aes(x = gest, y = log(birthweight)), alpha = 0.3) +
+    labs(subtitle = "model 3", x = "Gest. age (weeks)", y = "log birth weight (log(kg))") +
+    geom_vline(xintercept = 31.75) +
+    geom_vline(xintercept = 36.75) +
+    geom_hline(yintercept = log(2.5))
+
+p1 + p2 + p3 + plot_layout() & ylim(-1.5, 2)
+```
+
